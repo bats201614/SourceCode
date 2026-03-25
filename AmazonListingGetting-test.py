@@ -1,6 +1,7 @@
 import os
 import time
 import random
+import re
 # import tkinter as tk
 # from tkinter import filedialog
 import pandas as pd
@@ -12,8 +13,6 @@ def setup_edge_browser():
     """
     print("正在初始化 Chrome 浏览器配置...")
     co = ChromiumOptions()
-    #配合隐藏自动化特征
-    co.set_argument('--disable-blink-features=AutomationControlled')
     # 设置UA
     my_ua = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36"
     co.set_user_agent(my_ua)
@@ -66,6 +65,26 @@ def setup_edge_browser():
     page = ChromiumPage(co)
     return page
 
+def extract_size_from_text(text):
+    """
+    从给定的文本中通过正则提取尺寸 (例如: 11 x 14)
+    """
+    if not text:
+        return None
+    
+    # 匹配模式解释:
+    # (\d+\.?\d*) -> 匹配数字（支持小数）
+    # \s*[xX*×-]\s* -> 匹配连接符（x, X, *, ×, -），允许前后有空格
+    # (\d+\.?\d*) -> 匹配第二个数字
+    # (?:\s*(?:inch|inches|cm|mm|")\b)? -> 可选匹配单位
+    pattern = r'(\d+\.?\d*)\s*[xX*×-]\s*(\d+\.?\d*)(?:\s*(?:inch|inches|cm|mm|")\b)?'
+    
+    match = re.search(pattern, text)
+    if match:
+        # 返回格式如 "11 x 14"
+        return f"{match.group(1)} x {match.group(2)}"
+    return None
+
 def scrape_amazon_item(page, url, asin):
     print(f"\n正在访问: {url}")
     page.get(url)
@@ -80,6 +99,7 @@ def scrape_amazon_item(page, url, asin):
         '链接': url,
         '商品标题': '',
         '当前价格': '',
+        '尺寸/规格': '',
         '五点描述': ''
     }
 
@@ -119,6 +139,44 @@ def scrape_amazon_item(page, url, asin):
     else:
         print("警告：未能定位到五点描述")
 
+    # 4. 抓取尺寸 (Size)
+    selectors = [
+        '#inline-twister-expanded-dimension-text-size_name',
+        '#variation_size_name .selection',
+        '.inline-twister-dim-title-value'
+    ]
+
+    # --- 第一阶段：尝试从页面特定元素获取 ---
+    for selector in selectors:
+        size_ele = page.ele(selector, timeout=1) # 缩短等待时间
+        if size_ele and size_ele.text.strip():
+            val = size_ele.text.strip()
+            data['尺寸/规格'] = val
+            print(f"✅ 选择器捕获: {val}")
+            return data  # 直接返回，后面所有的代码（包括正则、标题抓取）都不执行了
+
+   # --- 第二阶段：模糊匹配（备选方案） ---
+    # 只有第一阶段全失败了，才会执行到这里
+    print("🔍 进入保底方案：正则扫描文本...")
+    
+    # 一次性获取所有可能包含尺寸的文本块
+    # 亚马逊的标题和五点是尺寸信息最集中的地方
+    title = page.ele('#productTitle').text if page.ele('#productTitle') else ""
+    bullets = page.ele('#feature-bullets').text if page.ele('#feature-bullets') else ""
+    
+    # 甚至可以加上产品详情表格中的文本
+    details = page.ele('#prodDetails').text if page.ele('#prodDetails') else ""
+    
+    full_text = f"{title} {bullets} {details}"
+    extracted = extract_size_from_text(full_text)
+    
+    if extracted:
+        data['尺寸/规格'] = extracted
+        print(f"🎯 正则匹配成功: {extracted}")
+    else:
+        data['尺寸/规格'] = "未发现"
+        print("❌ 彻底未发现尺寸")
+        
     return data
 
 if __name__ == '__main__':
