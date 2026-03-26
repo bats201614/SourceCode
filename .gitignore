@@ -1,0 +1,24 @@
+# Claude Code
+.claude/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+
+# Excel files
+*.xlsx
+*.xlsm
+*.xls
+
+# Temporary folders
+2026-03-*/
+2026-02-*/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Other
+*.log
