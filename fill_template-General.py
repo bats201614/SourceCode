@@ -355,8 +355,11 @@ def fill_template_with_data(
 
         _set_cell(ws, column_map, 'Size', target_row, size_str, index=0)
 
-        _set_cell(ws, column_map, 'Item Length Longer Edge', target_row, 规格长, index=0)
-        _set_cell(ws, column_map, 'Item Width Shorter Edge', target_row, 规格宽, index=0)
+        # Item Length/Width 去掉小数点，转为整数
+        规格长_int = int(float(规格长)) if pd.notna(规格长) else 0
+        规格宽_int = int(float(规格宽)) if pd.notna(规格宽) else 0
+        _set_cell(ws, column_map, 'Item Length Longer Edge', target_row, 规格长_int, index=0)
+        _set_cell(ws, column_map, 'Item Width Shorter Edge', target_row, 规格宽_int, index=0)
         _set_cell(ws, column_map, 'Item Length Unit', target_row, FIXED_VALUES['item_length_unit'], index=0)
         _set_cell(ws, column_map, 'Item Width Unit', target_row, FIXED_VALUES['item_width_unit'], index=0)
 
