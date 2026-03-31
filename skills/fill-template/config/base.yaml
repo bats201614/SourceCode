@@ -1,0 +1,34 @@
+# ========== 产品信息表 - 列索引（通用）==========
+# 变量名 -> 0-based列号的映射
+sku_columns:
+  序号: 0
+  材质: 1
+  作品名称: 2
+  型号: 3
+  PCS数: 4
+  颜色: 5
+  规格长: 6
+  规格宽: 7
+  规格高: 8
+  重量LB_毛重: 9
+  重量LB_净重: 10
+  亚马逊SKU: 19
+  商品名称: 23
+
+# ========== Listing文案表 - 查找逻辑（通用）==========
+listing_search:
+  title_search:
+    search_column: 0      # 在第0列（0-based）搜索标题
+    read_column: 1        # 在第1列（0-based）读取内容
+    match_mode: exact     # 精确匹配
+  content_offsets:
+    item_name: 1          # 标题所在行的下一行
+    bullet_points: [2, 3, 4, 5, 6]   # 5个要点
+    product_description: 7
+    generic_keyword: 8
+
+# ========== 目标模板 - 通用配置 ==========
+template:
+  sheet: "Template"
+  header_row: 4
+  data_start_row: 9

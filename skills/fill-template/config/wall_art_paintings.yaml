@@ -1,0 +1,65 @@
+# ========== 类目信息 ==========
+category:
+  name: "Wall Art - Paintings"
+  product_type: "WALL_ART"
+  item_type_keyword: "Paintings"
+
+# ========== 固定值配置（按用途分组）==========
+fixed_values:
+
+  # --- A. 核心必填字段 ---
+  core:
+    brand_name: "IUI"
+    product_id_type: "GTIN Exempt"
+    listing_action: "(Default) Create or Replace"
+    manufacturer: "IUI"
+
+  # --- B. 产品详情字段 ---
+  product_details:
+    parentage_level: "Child"
+    variation_theme: "Size/Color"
+    number_of_items: 1
+    item_shape: "Rectangular"
+
+  # --- C. 多值字段（会填满所有对应列）---
+  multi_value:
+    special_features:
+      - "Water Resistant"
+      - "Fade Resistant"
+      - "Scratch Resistant"
+      - "Durable"
+    material:
+      - "Cotton"
+      - "Wood"
+
+  # --- D. 框架与表面处理 ---
+  frame:
+    frame_color: "Brown"
+    frame_material: "Wood"
+    frame_type: "Unframed"
+    mounting_type: "Wall Mount"
+    finish_type: "Painted"
+    wall_art_form: "Art Print"
+    style: "Abstract"
+
+  # --- E. 单位与尺寸 ---
+  units:
+    item_length_unit: "Inches"
+    item_width_unit: "Inches"
+    item_weight_unit: "Pounds"
+    package_length_unit: "Centimeters"
+    package_width_unit: "Centimeters"
+    package_height_unit: "Centimeters"
+    package_weight_unit: "Kilograms"
+
+  # --- F. 库存与物流 ---
+  fulfillment:
+    item_condition: "New"
+    quantity_us: 100
+    merchant_shipping_group: "Migrated Template"
+    fulfillment_channel_code_us: "DEFAULT"
+
+  # --- G. 合规性 ---
+  compliance:
+    country_of_origin: "United States"
+    unit_count: 1
