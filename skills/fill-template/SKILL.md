@@ -20,7 +20,7 @@ Fills Amazon batch upload templates with product data.
 
 ## Usage
 
-Run `python skills/fill-template/fill_template-General.py`
+Run `python skills/fill-template/scripts/fill_template-General.py`
 
 ## Configuration
 
