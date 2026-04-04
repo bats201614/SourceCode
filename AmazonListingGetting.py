@@ -1,6 +1,7 @@
 import os
 import time
 import random
+import re
 import tkinter as tk
 from tkinter import filedialog
 import pandas as pd
@@ -12,17 +13,11 @@ def setup_edge_browser():
     """
     print("正在初始化 Chrome 浏览器配置...")
     co = ChromiumOptions()
-    #配合隐藏自动化特征
-    co.set_argument('--disable-blink-features=AutomationControlled')
     # 设置UA
     my_ua = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36"
     co.set_user_agent(my_ua)
 
     # 设置浏览器的执行路径（这里以 Windows 默认路径为例）
-    # 较新版本的 DrissionPage 直接写 'edge'或'chrome' 即可自动寻找
-    # edge_path = r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe"
-    # browser_path = r"D:\software\dailysoftware\Chrome\chrome.exe" 
-    # co.set_browser_path(browser_path)
     # --- 策略 1: 尝试让系统自己找 ---
     # 尝试顺序：Chrome -> Edge
     success = False
@@ -60,11 +55,16 @@ def setup_edge_browser():
             raise FileNotFoundError("❌ 用户未选择浏览器路径，程序无法运行。")
             
     return ChromiumPage(co)
-    
-    
-    # # 启动浏览器并返回页面对象
-    # page = ChromiumPage(co)
-    # return page
+
+SIZE_PATTERN = re.compile(r'(\d+\.?\d*)\s*[xX*×-]\s*(\d+\.?\d*)(?:\s*(?:inch|inches|cm|mm|")\b)?')
+
+def extract_size_from_text(text):
+    if not text:
+        return None
+    match = SIZE_PATTERN.search(text)
+    if match:
+        return f"{match.group(1)} x {match.group(2)}"
+    return None
 
 def scrape_amazon_item(page, url, asin):
     print(f"\n正在访问: {url}")
@@ -80,6 +80,7 @@ def scrape_amazon_item(page, url, asin):
         '链接': url,
         '商品标题': '',
         '当前价格': '',
+        '尺寸/规格': '',
         '五点描述': ''
     }
 
@@ -119,14 +120,52 @@ def scrape_amazon_item(page, url, asin):
     else:
         print("警告：未能定位到五点描述")
 
+    # 4. 抓取尺寸 (Size)
+    selectors = [
+        '#inline-twister-expanded-dimension-text-size_name',
+        '#variation_size_name .selection',
+        '.inline-twister-dim-title-value'
+    ]
+
+    # --- 第一阶段：尝试从页面特定元素获取 ---
+    for selector in selectors:
+        size_ele = page.ele(selector, timeout=1)
+        if size_ele and size_ele.text.strip():
+            val = size_ele.text.strip()
+            data['尺寸/规格'] = val
+            print(f"✅ 选择器捕获: {val}")
+            return data
+
+    # --- 第二阶段：模糊匹配（备选方案） ---
+    print("🔍 进入保底方案：正则扫描文本...")
+
+    title_ele = page.ele('#productTitle')
+    bullets_ele = page.ele('#feature-bullets')
+    details_ele = page.ele('#prodDetails')
+    title = title_ele.text.strip() if title_ele else ""
+    bullets = bullets_ele.text.strip() if bullets_ele else ""
+    details = details_ele.text.strip() if details_ele else ""
+
+    full_text = f"{title} {bullets} {details}"
+    extracted = extract_size_from_text(full_text)
+
+    if extracted:
+        data['尺寸/规格'] = extracted
+        print(f"🎯 正则匹配成功: {extracted}")
+    else:
+        data['尺寸/规格'] = "未发现"
+        print("❌ 彻底未发现尺寸")
+
     return data
 
 if __name__ == '__main__':
     # ================= 1. 准备你的竞品链接 =================
     # 获取当前脚本运行的绝对目录
     current_dir = os.path.dirname(os.path.abspath(__file__))
-    # 要把“竞品ASIN清单.xlsx”放在代码同一个文件夹里就行
-    input_file = os.path.join(current_dir, "竞品ASIN清单.xlsx")
+    # 让用户输入 ASIN 清单 Excel 文件路径
+    input_file = input("请输入 ASIN 清单 Excel 文件路径：").strip()
+    if not input_file:
+        raise FileNotFoundError("未输入文件路径，程序退出。")
     try:
         df_input = pd.read_excel(input_file)
         # 将 ASIN 列转为列表，并去除可能的空格

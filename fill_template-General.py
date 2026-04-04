@@ -1,10 +1,11 @@
 """
 亚马逊批量上传模板自动化脚本
-从SKU编码申请表和油画指标分析表读取数据，填充到HighFashion.xlsm模板
+从产品信息表和listing表读取数据，填充到HighFashion.xlsm模板
 """
 
 import pandas as pd
 import openpyxl
+import os
 from openpyxl import load_workbook
 from openpyxl.worksheet.worksheet import Worksheet
 from typing import Dict, List, Any
@@ -13,16 +14,16 @@ import re
 
 # ==================== 配置常量 ====================
 
-# 源文件路径
-SKU申请表_PATH = r'C:\Users\Administrator\Desktop\个人\分析\油画\3.产品信息与模板\SKU编码申请表\HighFashion油画SKU编码申请(1).xlsx'
-油画指标分析_PATH = r'C:\Users\Administrator\Desktop\个人\分析\油画\3.产品信息与模板\油画指标分析.xlsx'
-目标文件_PATH = r'C:\Users\Administrator\Desktop\个人\分析\油画\链接上传\HighFashion.xlsm'
+# 源文件路径（运行时询问用户）
+产品信息表_PATH = None
+listing表_PATH = None
+目标文件_PATH = None
 
 # 源文件工作表
-SKU申请表_SHEET = 'Sheet1'
-油画指标分析_SHEET = '链接文案与尺寸定价'
-
-# SKU编码申请表列索引（0-based）
+产品信息表_SHEET = None
+listing表_SHEET = None
+7
+# 产品信息表列索引（0-based）
 COL_序号 = 0
 COL_材质 = 1
 COL_作品名称 = 2
@@ -139,10 +140,10 @@ def delete_template_copy(logger: logging.Logger, wb: openpyxl.Workbook) -> None:
         logger.info("Deleted existing Template_Copy worksheet")
 
 
-def read_sku申请表(logger: logging.Logger) -> pd.DataFrame:
-    logger.info(f"Reading SKU application form: {SKU申请表_PATH}")
+def read_产品信息表(logger: logging.Logger) -> pd.DataFrame:
+    logger.info(f"Reading SKU application form: {产品信息表_PATH}")
 
-    df = pd.read_excel(SKU申请表_PATH, sheet_name=SKU申请表_SHEET, header=None)
+    df = pd.read_excel(产品信息表_PATH, sheet_name=产品信息表_SHEET, header=None)
     data_start = 2
 
     result_df = pd.DataFrame()
@@ -165,10 +166,10 @@ def read_sku申请表(logger: logging.Logger) -> pd.DataFrame:
     return result_df
 
 
-def read_油画指标分析(logger: logging.Logger) -> Dict[str, Any]:
-    logger.info(f"Reading oil painting indicator analysis: {油画指标分析_PATH}")
+def read_listing表(logger: logging.Logger) -> Dict[str, Any]:
+    logger.info(f"Reading listing indicator analysis: {listing表_PATH}")
 
-    df = pd.read_excel(油画指标分析_PATH, sheet_name=油画指标分析_SHEET, header=None)
+    df = pd.read_excel(listing表_PATH, sheet_name=listing表_SHEET, header=None)
 
     result = {
         'item_name': None,
@@ -190,7 +191,7 @@ def read_油画指标分析(logger: logging.Logger) -> Dict[str, Any]:
         logger.info(f"Loaded generic_keyword: {result['generic_keyword'][:50] if result['generic_keyword'] else 'None'}...")
 
     except Exception as e:
-        logger.warning(f"Error reading oil painting analysis: {e}")
+        logger.warning(f"Error reading listing analysis: {e}")
 
     return result
 
@@ -268,7 +269,7 @@ def fill_template_with_data(
     wb: openpyxl.Workbook,
     column_map: Dict[str, List[int]],
     sku_df: pd.DataFrame,
-    油画指标分析: Dict[str, Any]
+    listing表: Dict[str, Any]
 ) -> None:
     """向模板副本填充数据"""
     logger.info("Filling template with data")
@@ -277,7 +278,7 @@ def fill_template_with_data(
 
     item_type_keyword = get_item_type_keyword_from_template(logger, wb)
     start_row = 9  # 从第9行开始填写，第8行及之前是带颜色的示例单元格
-    item_name_template = 油画指标分析['item_name']
+    item_name_template = listing表['item_name']
 
     # 遍历SKU数据行
     for idx, row in sku_df.iterrows():
@@ -302,10 +303,10 @@ def fill_template_with_data(
         _set_cell(ws, column_map, 'Product Id Type', target_row, FIXED_VALUES['product_id_type'], index=0)
         _set_cell(ws, column_map, 'Item Type Keyword', target_row, item_type_keyword, index=0)
         _set_cell(ws, column_map, 'Manufacturer', target_row, FIXED_VALUES['manufacturer'], index=0)
-        _set_cell(ws, column_map, 'Product Description', target_row, 油画指标分析['product_description'], index=0)
+        _set_cell(ws, column_map, 'Product Description', target_row, listing表['product_description'], index=0)
 
         # Bullet Points - 填满5列
-        bullet_points = 油画指标分析['bullet_points']
+        bullet_points = listing表['bullet_points']
         bp_cols = column_map.get('Bullet Point', [])
         for i in range(len(bp_cols)):
             value = bullet_points[i] if i < len(bullet_points) else ''
@@ -314,7 +315,7 @@ def fill_template_with_data(
         # Generic Keyword - 只填第一列
         gk_cols = column_map.get('Generic Keyword', [])
         if gk_cols:
-            ws.cell(row=target_row, column=gk_cols[0], value=油画指标分析['generic_keyword'])
+            ws.cell(row=target_row, column=gk_cols[0], value=listing表['generic_keyword'])
 
         # B. 产品详情列（固定值）
         # Special Features - 填满5列（4个固定值+1个空或重复）
@@ -469,13 +470,76 @@ def copy_values_to_template(logger: logging.Logger, start_row: int = 9, num_rows
 
 def main():
     """主函数"""
+    global 产品信息表_PATH, listing表_PATH, 目标文件_PATH
+    global 产品信息表_SHEET, listing表_SHEET
+
     logger = setup_logging()
 
+    def clean_path(p: str) -> str:
+        """去除路径首尾的双引号和空格，兼容复制粘贴的带引号路径"""
+        return p.strip().strip('"').strip()
+
+    def ask_path(prompt: str) -> str:
+        """循环询问路径，直到文件存在或用户选择退出"""
+        while True:
+            path = clean_path(input(prompt))
+            if not path:
+                print("路径不能为空。")
+                continue
+            if not os.path.isfile(path):
+                print(f"文件不存在：{path}")
+                retry = input("按 Enter 重新输入，或输入 q 退出：").strip().lower()
+                if retry == 'q':
+                    print("已退出。")
+                    raise SystemExit(0)
+                continue
+            return path
+
+    def ask_sheet(prompt: str, default: str) -> str:
+        """循环询问工作表名，直到工作表存在或用户选择退出"""
+        sheet_name = input(f"{prompt}（默认：{default}）：").strip()
+        return sheet_name if sheet_name else default
+
+    def validate_sheet(path: str, sheet: str) -> bool:
+        """验证工作表是否存在"""
+        try:
+            xl = pd.ExcelFile(path)
+            return sheet in xl.sheet_names
+        except Exception:
+            return False
+
+    print("=" * 50)
+    print("请依次输入以下文件路径和信息：")
+    print("=" * 50)
+
+    产品信息表_PATH = ask_path("产品信息表路径：")
+    产品信息表_SHEET = ask_sheet("产品信息表工作表名", "Sheet1")
+    while not validate_sheet(产品信息表_PATH, 产品信息表_SHEET):
+        print(f"工作表「{产品信息表_SHEET}」不存在。")
+        retry = input("按 Enter 重新输入工作表名，或输入 q 退出：").strip().lower()
+        if retry == 'q':
+            print("已退出。")
+            raise SystemExit(0)
+        产品信息表_SHEET = ask_sheet("产品信息表工作表名", "Sheet1")
+
+    listing表_PATH = ask_path("listing表路径：")
+    listing表_SHEET = ask_sheet("listing表工作表名", "链接文案与尺寸定价")
+    while not validate_sheet(listing表_PATH, listing表_SHEET):
+        print(f"工作表「{listing表_SHEET}」不存在。")
+        retry = input("按 Enter 重新输入工作表名，或输入 q 退出：").strip().lower()
+        if retry == 'q':
+            print("已退出。")
+            raise SystemExit(0)
+        listing表_SHEET = ask_sheet("listing表工作表名", "链接文案与尺寸定价")
+
+    目标文件_PATH = ask_path("目标模板文件(.xlsm)路径：")
+    print("=" * 50)
+
     try:
-        sku_df = read_sku申请表(logger)
-        油画指标分析 = read_油画指标分析(logger)
+        sku_df = read_产品信息表(logger)
+        listing表 = read_listing表(logger)
         wb, column_map = load_and_prepare_template(logger)
-        fill_template_with_data(logger, wb, column_map, sku_df, 油画指标分析)
+        fill_template_with_data(logger, wb, column_map, sku_df, listing表)
         save_template(logger, wb)
 
         logger.info("Data filled successfully in Template_Copy!")
