@@ -22,7 +22,7 @@ listing表_PATH = None
 # 源文件工作表
 产品信息表_SHEET = None
 listing表_SHEET = None
-7
+
 # 产品信息表列索引（0-based）
 COL_序号 = 0
 COL_材质 = 1

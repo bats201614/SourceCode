@@ -65,7 +65,7 @@ def get_multiple_pages_asins(page, target_url, target_count):
 
 if __name__ == '__main__':
     # --- 用户配置区 ---
-    search_url = "https://www.amazon.com/Best-Sellers-Home-Kitchen-Paintings/zgbs/home-garden/13336081/ref=zg_bs_nav_home-garden_2_3736081" # 你想搜的关键词页面
+    search_url = "https://www.amazon.com/gp/bestsellers/kitchen/3744211/ref=pd_zg_hrsr_kitchen" # 你想搜的关键词页面
     try:
         need_num = int(input("请输入你需要抓取的 ASIN 数量 (例如 50): "))
     except ValueError:
