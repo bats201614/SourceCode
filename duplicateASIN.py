@@ -1,6 +1,15 @@
 import os
+import re
 import shutil
 import pandas as pd
+
+def normalize_artwork_name(name):
+    """
+    将作品名称规范化为纯文字形式
+    - 去掉书名号《》、引号""、''、括号等所有特殊符号
+    - 保留中英文、数字
+    """
+    return re.sub(r'[^\u4e00-\u9fa5a-zA-Z0-9]', '', name)
 
 def ask_excel_path():
     """询问Excel路径"""
@@ -34,13 +43,21 @@ def load_mapping_from_excel(excel_path):
     valid_rows = df[df[asin_col].notna()]
     mapping = {}
     for _, row in valid_rows.iterrows():
-        # 去掉书名号《》便于匹配图片文件名
-        name = str(row[name_col]).strip().replace('《', '').replace('》', '')
+        name = str(row[name_col]).strip()
+        name = normalize_artwork_name(name)
         asin = str(row[asin_col]).strip()
         if name not in mapping:
             mapping[name] = []
         mapping[name].append(asin)
     return mapping
+
+# 分隔词列表（图片名中的通用描述，不是作品名的一部分）
+SEPARATORS = ["无框帆布画", "款帆布画", "无框", "款", "横", "竖", "横板", "竖板"]
+
+def is_separator(text, start_idx):
+    """检查 text[start_idx:] 是否以分隔词开头"""
+    substring = text[start_idx:]
+    return any(substring.startswith(sep) for sep in SEPARATORS)
 
 def match_images_to_artwork(image_folder, artwork_mapping):
     """
@@ -52,11 +69,23 @@ def match_images_to_artwork(image_folder, artwork_mapping):
     unmatched_images = []
 
     for img in all_images:
+        # 规范化图片名称后再匹配
+        img_normalized = normalize_artwork_name(img)
         matched_artwork = None
         for artwork_name in artwork_mapping.keys():
-            if artwork_name in img:
-                matched_artwork = artwork_name
-                break
+            if artwork_name in img_normalized:
+                # 找到匹配后，检查是否构成完整词
+                start_idx = img_normalized.find(artwork_name)
+                end_idx = start_idx + len(artwork_name)
+                # 前一个字符如果不是中文，是边界
+                prev_char_ok = (start_idx == 0 or not('\u4e00' <= img_normalized[start_idx - 1] <= '\u9fff'))
+                # 后一个字符如果不是中文，或者是分隔词，是边界
+                next_char_ok = (end_idx >= len(img_normalized) or
+                                not('\u4e00' <= img_normalized[end_idx] <= '\u9fff') or
+                                is_separator(img_normalized, end_idx))
+                if prev_char_ok and next_char_ok:
+                    matched_artwork = artwork_name
+                    break
         if matched_artwork:
             matched.append((img, artwork_mapping[matched_artwork]))
         else:
