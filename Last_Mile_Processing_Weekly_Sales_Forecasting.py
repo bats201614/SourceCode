@@ -350,46 +350,46 @@ def main():
             COL_FORECAST_WEEK7, COL_FORECAST_WEEK8
         ]
 
-        # 清货/停售类型：8周预测全填0
-        zero_link_types = {'C', '可调拨链接', '停售链接'}
-        if link_type in zero_link_types:
-            logging.info(f"  [清货/停售产品] 填入8个0")
-            for col in forecast_cols:
-                ws.cell(row=row, column=col).value = 0
-            forecast_sum = 0
-        else:
+        # # 清货/停售类型：8周预测全填0
+        # zero_link_types = {'C', '可调拨链接', '停售链接'}
+        # if link_type in zero_link_types:
+        #     logging.info(f"  [清货/停售产品] 填入8个0")
+        #     for col in forecast_cols:
+        #         ws.cell(row=row, column=col).value = 0
+        #     forecast_sum = 0
+        # else:
             # 链接类型系数映射
-            link_type_multipliers = {'A': 1.2, 'N': 0.8}
-            multiplier = link_type_multipliers.get(link_type, 1.0)
-            link_type_names = {'A': '拉升链接', 'N': '新品链接'}
-            type_name = link_type_names.get(link_type, '其他类型')
-            logging.info(f"  [{type_name}] 使用模型计算 x {multiplier}")
+        link_type_multipliers = {'A': 1.2, 'N': 0.8}
+        multiplier = link_type_multipliers.get(link_type, 1.0)
+        link_type_names = {'A': '拉升链接', 'N': '新品链接'}
+        type_name = link_type_names.get(link_type, '其他类型')
+        logging.info(f"  [{type_name}] 使用模型计算 x {multiplier}")
 
-            # 计算基础预测
-            row_data = {
-                'sales_7d': sales_7d,
-                'sales_30d': sales_30d,
-                'monthly_speed': monthly_speed
-            }
-            max_stockout = max(stockout_7d, stockout_14d, stockout_30d)
+        # 计算基础预测
+        row_data = {
+            'sales_7d': sales_7d,
+            'sales_30d': sales_30d,
+            'monthly_speed': monthly_speed
+        }
+        max_stockout = max(stockout_7d, stockout_14d, stockout_30d)
 
-            weekly_base = calculate_weekly_forecast(row_data)
-            weekly_base = apply_outage_correction(weekly_base, max_stockout)
-            weekly_base = int(round(weekly_base * multiplier))
+        weekly_base = calculate_weekly_forecast(row_data)
+        weekly_base = apply_outage_correction(weekly_base, max_stockout)
+        weekly_base = int(round(weekly_base * multiplier))
 
-            # 生成8周趋势预测
-            weekly_forecasts, trend_type, inventory_suggestion = generate_trend_weekly_forecast(
-                weekly_base, sales_7d, sales_14d, sales_30d, sales_60d, sales_90d,
-                fba_transit, fba_transit_days, replenishment_days
-            )
-            logging.info(f"  基础预测: {weekly_base}, 趋势类型: {trend_type}")
-            logging.info(f"  8周预测: {weekly_forecasts}")
-            if inventory_suggestion:
-                logging.info(f"  库存建议: {inventory_suggestion}")
+        # 生成8周趋势预测
+        weekly_forecasts, trend_type, inventory_suggestion = generate_trend_weekly_forecast(
+            weekly_base, sales_7d, sales_14d, sales_30d, sales_60d, sales_90d,
+            fba_transit, fba_transit_days, replenishment_days
+        )
+        logging.info(f"  基础预测: {weekly_base}, 趋势类型: {trend_type}")
+        logging.info(f"  8周预测: {weekly_forecasts}")
+        if inventory_suggestion:
+            logging.info(f"  库存建议: {inventory_suggestion}")
 
-            for i, col in enumerate(forecast_cols):
-                ws.cell(row=row, column=col).value = weekly_forecasts[i]
-            forecast_sum = sum(weekly_forecasts)
+        for i, col in enumerate(forecast_cols):
+            ws.cell(row=row, column=col).value = weekly_forecasts[i]
+        forecast_sum = sum(weekly_forecasts)
 
         # Step 4: 填入8周预测汇总
         ws.cell(row=row, column=COL_FORECAST_SUM).value = round(forecast_sum, 2)
