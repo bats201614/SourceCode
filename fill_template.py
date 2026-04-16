@@ -43,7 +43,7 @@ FIXED_VALUES = {
     'product_type': 'WALL_ART',
     'brand_name': 'IUI',
     'product_id_type': 'GTIN Exempt',
-    'listing_action': '(Default) Create or Replace',
+    'listing_action': 'Create or Replace (Full Update)',
     'item_type_keyword': 'Paintings',
     'manufacturer': 'IUI',
     'parentage_level': 'Child',
@@ -132,6 +132,131 @@ def find_exact_columns(ws: Worksheet, exact_name: str) -> List[int]:
     return sorted(cols)
 
 
+# ==================== 自动检测列位置 ====================
+
+def auto_detect_columns(logger: logging.Logger, df: pd.DataFrame, header_row: int = 0) -> Dict[str, int]:
+    """
+    读取表头行，通过关键词匹配找到对应列索引
+    支持单行或双行表头结构（Row 0是主分类，Row 1是子列名）
+    返回: {'亚马逊SKU': 19, '型号': 3, ...}
+    对于每个列：先查Row 0，找不到再到Row 1找（适用于合并单元格情况）
+    """
+    headers_row0 = df.iloc[header_row]
+    has_row1 = header_row + 1 < len(df)
+
+    col_map = {}
+
+    def get_header_value(row_idx: int, col_idx: int) -> str:
+        """安全获取表头值"""
+        try:
+            val = df.iloc[row_idx, col_idx] if row_idx < len(df) else None
+            return str(val).strip() if val is not None and pd.notna(val) else ''
+        except Exception:
+            return ''
+
+    def try_match_Col(h: str, *keywords: str) -> bool:
+        """检查表头值是否包含任意一个关键词"""
+        for kw in keywords:
+            if kw in h:
+                return True
+        return False
+
+    # 用于追踪当前所属的主标题（处理合并单元格）
+    current_parent_header = None
+
+    for i in range(len(headers_row0)):
+        h0 = get_header_value(header_row, i)
+        h1 = get_header_value(header_row + 1, i) if has_row1 else ''
+
+        # 如果h0不为空，可能是新的主标题（用于处理合并单元格子列）
+        if h0:
+            if '规格' in h0:
+                current_parent_header = '规格'
+            elif '重量' in h0 and 'LB' in h0:
+                current_parent_header = '重量'
+            elif '销售包装' in h0:
+                current_parent_header = '销售包装'
+            else:
+                current_parent_header = None
+
+        # 匹配亚马逊SKU列 - Row0优先，Row1备选
+        if '亚马逊SKU' not in col_map:
+            if try_match_Col(h0, 'SKU', '亚马逊SKU') and try_match_Col(h0, '亚马逊', 'Amazon', 'amazon'):
+                col_map['亚马逊SKU'] = i
+            elif try_match_Col(h1, 'SKU', '亚马逊SKU') and try_match_Col(h1, '亚马逊', 'Amazon', 'amazon'):
+                col_map['亚马逊SKU'] = i
+
+        # 匹配型号列 - Row0优先，Row1备选
+        if '型号' not in col_map:
+            if try_match_Col(h0, '型号') and not try_match_Col(h0, '图片'):
+                col_map['型号'] = i
+            elif try_match_Col(h1, '型号') and not try_match_Col(h1, '图片'):
+                col_map['型号'] = i
+
+        # 匹配作品名称列
+        if '作品名称' not in col_map:
+            if try_match_Col(h0, '作品名称', '商品名称'):
+                col_map['作品名称'] = i
+            elif try_match_Col(h1, '作品名称', '商品名称'):
+                col_map['作品名称'] = i
+
+        # 匹配规格长/宽/高 - 当current_parent_header是'规格'时（Row0有主标题，Row1是子列）
+        if current_parent_header == '规格':
+            if '规格长' not in col_map and try_match_Col(h1, '长') and not try_match_Col(h1, '宽') and not try_match_Col(h1, '高'):
+                col_map['规格长'] = i
+            elif '规格宽' not in col_map and try_match_Col(h1, '宽') and not try_match_Col(h1, '长'):
+                col_map['规格宽'] = i
+            elif '规格高' not in col_map and try_match_Col(h1, '高'):
+                col_map['规格高'] = i
+
+        # 匹配销售包装尺寸长/宽/高 - 当current_parent_header是'销售包装'时
+        if current_parent_header == '销售包装':
+            if '销售包装长' not in col_map and try_match_Col(h1, '长') and not try_match_Col(h1, '宽') and not try_match_Col(h1, '高'):
+                col_map['销售包装长'] = i
+            elif '销售包装宽' not in col_map and try_match_Col(h1, '宽') and not try_match_Col(h1, '长'):
+                col_map['销售包装宽'] = i
+            elif '销售包装高' not in col_map and try_match_Col(h1, '高'):
+                col_map['销售包装高'] = i
+
+        # 匹配重量LB毛重/净重 - 当current_parent_header是'重量'时
+        if current_parent_header == '重量':
+            if '重量LB_毛重' not in col_map and try_match_Col(h1, '毛重'):
+                col_map['重量LB_毛重'] = i
+            elif '重量LB_净重' not in col_map and try_match_Col(h1, '净重'):
+                col_map['重量LB_净重'] = i
+
+        # 匹配商品名称列
+        if '商品名称' not in col_map:
+            if h0 == '商品名称' or h1 == '商品名称':
+                col_map['商品名称'] = i
+
+        # 匹配序号列
+        if '序号' not in col_map:
+            if h0 in ['序号', 'NO.', 'No.'] or h1 in ['序号', 'NO.', 'No.']:
+                col_map['序号'] = i
+
+        # 匹配材质列
+        if '材质' not in col_map:
+            if h0 == '材质' or h1 == '材质':
+                col_map['材质'] = i
+
+        # 匹配PCS数列
+        if 'PCS数' not in col_map:
+            if try_match_Col(h0, 'PCS', 'pcs', '数量') or try_match_Col(h1, 'PCS', 'pcs', '数量'):
+                col_map['PCS数'] = i
+
+        # 匹配颜色列
+        if '颜色' not in col_map:
+            if h0 == '颜色' or h1 == '颜色':
+                col_map['颜色'] = i
+
+    logger.info(f"Auto-detected {len(col_map)} columns from header row {header_row}:")
+    for name, idx in sorted(col_map.items(), key=lambda x: x[1]):
+        logger.info(f"  {name}: column {idx}")
+
+    return col_map
+
+
 # ==================== 数据读取函数 ====================
 
 def delete_template_copy(logger: logging.Logger, wb: openpyxl.Workbook) -> None:
@@ -144,47 +269,133 @@ def read_产品信息表(logger: logging.Logger) -> pd.DataFrame:
     logger.info(f"Reading SKU application form: {产品信息表_PATH}")
 
     df = pd.read_excel(产品信息表_PATH, sheet_name=产品信息表_SHEET, header=None)
-    data_start = 2
+
+    # 自动检测列位置
+    col_map = auto_detect_columns(logger, df, header_row=0)
+
+    # 检查必要的列是否存在
+    required_cols = ['亚马逊SKU', '型号', '规格长', '规格宽']
+    missing = [c for c in required_cols if c not in col_map]
+    if missing:
+        raise ValueError(f"Cannot find required columns: {missing}")
+
+    data_start = 2  # 数据从第3行开始
 
     result_df = pd.DataFrame()
-    result_df['序号'] = df.iloc[data_start:, COL_序号].reset_index(drop=True)
-    result_df['材质'] = df.iloc[data_start:, COL_材质].reset_index(drop=True)
-    result_df['作品名称'] = df.iloc[data_start:, COL_作品名称].reset_index(drop=True)
-    result_df['型号'] = df.iloc[data_start:, COL_型号].reset_index(drop=True)
-    result_df['PCS数'] = df.iloc[data_start:, COL_PCS数].reset_index(drop=True)
-    result_df['颜色'] = df.iloc[data_start:, COL_颜色].reset_index(drop=True)
-    result_df['规格长'] = df.iloc[data_start:, COL_规格长].reset_index(drop=True)
-    result_df['规格宽'] = df.iloc[data_start:, COL_规格宽].reset_index(drop=True)
-    result_df['规格高'] = df.iloc[data_start:, COL_规格高].reset_index(drop=True)
-    result_df['重量LB_毛重'] = df.iloc[data_start:, COL_重量LB_毛重].reset_index(drop=True)
-    result_df['重量LB_净重'] = df.iloc[data_start:, COL_重量LB_净重].reset_index(drop=True)
-    result_df['亚马逊SKU'] = df.iloc[data_start:, COL_亚马逊SKU].reset_index(drop=True)
-    result_df['商品名称'] = df.iloc[data_start:, COL_商品名称].reset_index(drop=True)
+    result_df['序号'] = df.iloc[data_start:, col_map.get('序号', 0)].reset_index(drop=True) if '序号' in col_map else None
+    result_df['材质'] = df.iloc[data_start:, col_map.get('材质', 1)].reset_index(drop=True) if '材质' in col_map else None
+    result_df['作品名称'] = df.iloc[data_start:, col_map.get('作品名称', 2)].reset_index(drop=True) if '作品名称' in col_map else None
+    result_df['型号'] = df.iloc[data_start:, col_map['型号']].reset_index(drop=True)
+    result_df['PCS数'] = df.iloc[data_start:, col_map.get('PCS数', 4)].reset_index(drop=True) if 'PCS数' in col_map else None
+    result_df['颜色'] = df.iloc[data_start:, col_map.get('颜色', 5)].reset_index(drop=True) if '颜色' in col_map else None
+    result_df['规格长'] = df.iloc[data_start:, col_map['规格长']].reset_index(drop=True)
+    result_df['规格宽'] = df.iloc[data_start:, col_map['规格宽']].reset_index(drop=True)
+    result_df['规格高'] = df.iloc[data_start:, col_map.get('规格高', 8)].reset_index(drop=True) if '规格高' in col_map else None
+    result_df['重量LB_毛重'] = df.iloc[data_start:, col_map.get('重量LB_毛重', 9)].reset_index(drop=True) if '重量LB_毛重' in col_map else None
+    result_df['重量LB_净重'] = df.iloc[data_start:, col_map.get('重量LB_净重', 10)].reset_index(drop=True) if '重量LB_净重' in col_map else None
+    result_df['亚马逊SKU'] = df.iloc[data_start:, col_map['亚马逊SKU']].reset_index(drop=True)
+    result_df['商品名称'] = df.iloc[data_start:, col_map.get('商品名称', col_map.get('作品名称', 23))].reset_index(drop=True)
 
     result_df = result_df[result_df['亚马逊SKU'].notna()]
     logger.info(f"Loaded {len(result_df)} SKUs from application form")
     return result_df
 
 
+def find_listing_categories(logger: logging.Logger, df: pd.DataFrame) -> List[tuple]:
+    """
+    查找listing表中的所有大标题（分类）
+    返回: [(行号, 标题名称), ...]
+    """
+    categories = []
+    for i in range(len(df)):
+        v0 = df.iloc[i, 0]
+        v1 = df.iloc[i, 1] if len(df.columns) > 1 else None
+        if pd.notna(v0) and str(v0).strip():
+            v0_str = str(v0).strip()
+            # Category titles have col 1 empty or nan
+            is_category = (v1 is None or pd.isna(v1) or str(v1).strip() == '')
+            if is_category:
+                categories.append((i, v0_str))
+    return categories
+
+
 def read_listing表(logger: logging.Logger) -> Dict[str, Any]:
+    """
+    读取listing表中的文案数据
+    1. 查找所有大标题
+    2. 让用户选择使用哪个大标题下的数据
+    3. 读取选中分类下的标题、五点描述、产品描述、ST
+    """
     logger.info(f"Reading listing indicator analysis: {listing表_PATH}")
 
     df = pd.read_excel(listing表_PATH, sheet_name=listing表_SHEET, header=None)
+
+    # 查找所有分类
+    categories = find_listing_categories(logger, df)
+
+    if not categories:
+        raise ValueError("No categories found in listing table")
+
+    # 打印所有分类供用户选择
+    print("\n" + "=" * 50)
+    print("Listing表中的大标题：")
+    print("=" * 50)
+    for idx, (row_num, title) in enumerate(categories):
+        print(f"  {idx + 1}. {title} (Row {row_num})")
+    print("=" * 50)
+
+    # 让用户选择分类
+    while True:
+        try:
+            choice = input("请选择大标题编号 (1-{}): ".format(len(categories))).strip()
+            if not choice:
+                print("输入不能为空")
+                continue
+            choice_idx = int(choice) - 1
+            if 0 <= choice_idx < len(categories):
+                selected_row, selected_title = categories[choice_idx]
+                break
+            else:
+                print(f"请输入 1 到 {len(categories)} 之间的数字")
+        except ValueError:
+            print("请输入有效的数字")
+
+    logger.info(f"Selected category: {selected_title} at row {selected_row}")
+
+    # 读取选中分类下的数据
+    # 结构: Row n=分类标题, Row n+1=标题, Row n+2~n+6=5个五点描述, Row n+7=产品描述, Row n+8=ST
+    item_name_row = selected_row + 1
+    bullet_start_row = selected_row + 2
+    product_desc_row = selected_row + 7
+    generic_keyword_row = selected_row + 8
 
     result = {
         'item_name': None,
         'bullet_points': [],
         'product_description': None,
         'generic_keyword': None,
+        'category_title': selected_title,
     }
 
     try:
-        result['item_name'] = str(df.iloc[32, 1]) if pd.notna(df.iloc[32, 1]) else ''
+        # 读取标题
+        if item_name_row < len(df):
+            result['item_name'] = str(df.iloc[item_name_row, 1]) if pd.notna(df.iloc[item_name_row, 1]) else ''
+
+        # 读取5个五点描述
         for i in range(5):
-            bp = str(df.iloc[33 + i, 1]) if pd.notna(df.iloc[33 + i, 1]) else ''
-            result['bullet_points'].append(bp)
-        result['product_description'] = str(df.iloc[38, 1]) if pd.notna(df.iloc[38, 1]) else ''
-        result['generic_keyword'] = str(df.iloc[39, 1]) if pd.notna(df.iloc[39, 1]) else ''
+            row_idx = bullet_start_row + i
+            if row_idx < len(df):
+                bp = str(df.iloc[row_idx, 1]) if pd.notna(df.iloc[row_idx, 1]) else ''
+                result['bullet_points'].append(bp)
+
+        # 读取产品描述
+        if product_desc_row < len(df):
+            result['product_description'] = str(df.iloc[product_desc_row, 1]) if pd.notna(df.iloc[product_desc_row, 1]) else ''
+
+        # 读取ST
+        if generic_keyword_row < len(df):
+            result['generic_keyword'] = str(df.iloc[generic_keyword_row, 1]) if pd.notna(df.iloc[generic_keyword_row, 1]) else ''
 
         logger.info(f"Loaded item_name: {result['item_name'][:50] if result['item_name'] else 'None'}...")
         logger.info(f"Loaded {len(result['bullet_points'])} bullet points")
@@ -192,6 +403,8 @@ def read_listing表(logger: logging.Logger) -> Dict[str, Any]:
 
     except Exception as e:
         logger.warning(f"Error reading listing analysis: {e}")
+
+    return result
 
     return result
 
