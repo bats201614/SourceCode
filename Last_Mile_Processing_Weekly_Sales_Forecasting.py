@@ -9,6 +9,7 @@ import re
 import pandas as pd
 import logging
 from datetime import datetime
+from tqdm import tqdm
 
 
 def setup_logging(log_dir):
@@ -116,7 +117,7 @@ def analyze_trend(sales_7d, sales_14d, sales_30d, sales_60d, sales_90d):
         # 近7天和14天都极低，但长期数据正常 → 断档恢复期
         if r7 > r14 > 0.5:  # 正在恢复
             return 'recovery', 1.10  # 断档恢复中，销量回升
-        elif r7 < 0.1 and r14 < 0.2:  # 仍在断档
+        elif r7 < 0.1:  # 仍在断档
             return 'out_of_stock', 1.0  # 仍处于断档状态
         else:
             return 'out_of_stock', 1.05  # 断档后过渡期
@@ -235,6 +236,33 @@ def apply_outage_correction(forecast, stockout_days, period_days=7):
     return forecast
 
 
+def validate_row_data(sales_7d, sales_14d, sales_30d, sales_60d, sales_90d, monthly_speed):
+    """
+    校验销量数据，负数或异常值记录警告并修正
+    返回: (corrected_values_dict, issues_list)
+    """
+    issues = []
+    corrected = {}
+
+    # 校验所有销量值 >= 0
+    for name, val in [('7天', sales_7d), ('14天', sales_14d), ('30天', sales_30d),
+                      ('60天', sales_60d), ('90天', sales_90d), ('月速度', monthly_speed)]:
+        # 尝试转换为数值，非数值或None则修正为0
+        try:
+            num_val = float(val) if val is not None else 0
+        except (ValueError, TypeError):
+            issues.append(f"{name}销量异常({val})，已修正为0")
+            corrected[name] = 0
+            continue
+        if num_val < 0:
+            issues.append(f"{name}销量负数({num_val})，已修正为0")
+            corrected[name] = 0
+        else:
+            corrected[name] = num_val
+
+    return corrected, issues
+
+
 def main():
     # 询问用户文件路径
     file_path = input("请输入尾程Excel文件完整路径：").strip().strip('"')
@@ -260,12 +288,13 @@ def main():
         return
     logging.info(f"解析到日期：{month}月{day}日")
 
-    # 加载工作簿（data_only=True读取计算值，False读取公式用于写入）
-    wb_data = load_workbook(file_path, data_only=True)
-    ws_data = wb_data.active
-
+    # 加载工作簿
+    # - wb: 用于写入（不带data_only，保留公式）
+    # - wb_data: 用于读取计算值（data_only=True，读取公式的计算结果）
     wb = load_workbook(file_path)
     ws = wb.active
+    wb_data = load_workbook(file_path, data_only=True)
+    ws_data = wb_data.active
 
     # 定义需要解除锁定的列索引（1-based for openpyxl）
     # 根据之前分析: 列28,29月度规划; 列38-45预测; 列82,84销量; 列92库存; 列102当月销量
@@ -285,36 +314,36 @@ def main():
     logging.info(f"共识别{len(headers)}个列名")
 
     # 使用关键词模糊匹配关键列
-    COL_LINK_TYPE = find_col_by_keywords(headers, ['走货链接类型']) or 26
-    COL_SALES_7D = find_col_by_keywords(headers, ['近7天', '月化销量']) or 83
-    COL_SALES_14D = find_col_by_keywords(headers, ['近14天', '月化销量']) or 84
-    COL_SALES_30D = find_col_by_keywords(headers, ['近30天', '月化销量']) or 85
-    COL_SALES_60D = find_col_by_keywords(headers, ['近60天', '月化销量']) or 86
-    COL_SALES_90D = find_col_by_keywords(headers, ['近90天', '月化销量']) or 87
-    COL_STOCKOUT_7D = find_col_by_keywords(headers, ['近7天', '断货']) or 88
-    COL_STOCKOUT_14D = find_col_by_keywords(headers, ['近14天', '断货']) or 90
-    COL_STOCKOUT_30D = find_col_by_keywords(headers, ['近30天', '断货']) or 92
-    COL_MONTHLY_SPEED = find_col_by_keywords(headers, ['月综合销售速度', '剔除近期断货']) or 82
-    COL_FBA_DAYS = find_col_by_keywords(headers, ['FBA', '在仓可售天数']) or 94
-    COL_FBA_TRANSIT = find_col_by_keywords(headers, ['FBA', '在仓+在途库存']) or 95
-    COL_FBA_TRANSIT_DAYS = find_col_by_keywords(headers, ['FBA在仓+FBA在途可售天数']) or 96
-    COL_REPLENISHMENT_DAYS = find_col_by_keywords(headers, ['尾程补货天数']) or 77
-    COL_CURRENT_MONTH_SALES = find_col_by_keywords(headers, ['当月销量']) or 103
-    COL_FORECAST_WEEK1 = find_col_by_keywords(headers, ['店长预测', '第1周']) or 39
-    COL_FORECAST_WEEK2 = find_col_by_keywords(headers, ['店长预测', '第2周']) or 40
-    COL_FORECAST_WEEK3 = find_col_by_keywords(headers, ['店长预测', '第3周']) or 41
-    COL_FORECAST_WEEK4 = find_col_by_keywords(headers, ['店长预测', '第4周']) or 42
-    COL_FORECAST_WEEK5 = find_col_by_keywords(headers, ['店长预测', '第5周']) or 43
-    COL_FORECAST_WEEK6 = find_col_by_keywords(headers, ['店长预测', '第6周']) or 44
-    COL_FORECAST_WEEK7 = find_col_by_keywords(headers, ['店长预测', '第7周']) or 45
-    COL_FORECAST_WEEK8 = find_col_by_keywords(headers, ['店长预测', '第8周']) or 46
-    COL_FORECAST_SUM = find_col_by_keywords(headers, ['未来8周预测销量汇总']) or 47
+    COL_LINK_TYPE = find_col_by_keywords(headers, ['走货链接类型'])
+    COL_SALES_7D = find_col_by_keywords(headers, ['近7天', '月化销量'])
+    COL_SALES_14D = find_col_by_keywords(headers, ['近14天', '月化销量'])
+    COL_SALES_30D = find_col_by_keywords(headers, ['近30天', '月化销量'])
+    COL_SALES_60D = find_col_by_keywords(headers, ['近60天', '月化销量'])
+    COL_SALES_90D = find_col_by_keywords(headers, ['近90天', '月化销量'])
+    COL_STOCKOUT_7D = find_col_by_keywords(headers, ['近7天', '断货'])
+    COL_STOCKOUT_14D = find_col_by_keywords(headers, ['近14天', '断货'])
+    COL_STOCKOUT_30D = find_col_by_keywords(headers, ['近30天', '断货'])
+    COL_MONTHLY_SPEED = find_col_by_keywords(headers, ['月综合销售速度', '剔除近期断货'])
+    COL_FBA_DAYS = find_col_by_keywords(headers, ['FBA', '在仓可售天数'])
+    COL_FBA_TRANSIT = find_col_by_keywords(headers, ['FBA', '在仓+在途库存'])
+    COL_FBA_TRANSIT_DAYS = find_col_by_keywords(headers, ['FBA在仓+FBA在途可售天数'])
+    COL_REPLENISHMENT_DAYS = find_col_by_keywords(headers, ['尾程补货天数'])
+    COL_CURRENT_MONTH_SALES = find_col_by_keywords(headers, ['当月销量'])
+    COL_FORECAST_WEEK1 = find_col_by_keywords(headers, ['店长预测', '第1周'])
+    COL_FORECAST_WEEK2 = find_col_by_keywords(headers, ['店长预测', '第2周'])
+    COL_FORECAST_WEEK3 = find_col_by_keywords(headers, ['店长预测', '第3周'])
+    COL_FORECAST_WEEK4 = find_col_by_keywords(headers, ['店长预测', '第4周'])
+    COL_FORECAST_WEEK5 = find_col_by_keywords(headers, ['店长预测', '第5周'])
+    COL_FORECAST_WEEK6 = find_col_by_keywords(headers, ['店长预测', '第6周'])
+    COL_FORECAST_WEEK7 = find_col_by_keywords(headers, ['店长预测', '第7周'])
+    COL_FORECAST_WEEK8 = find_col_by_keywords(headers, ['店长预测', '第8周'])
+    COL_FORECAST_SUM = find_col_by_keywords(headers, ['未来8周预测销量汇总'])
 
     logging.info(f"计算当月销量（{month}月1日至{day}日）...")
 
     # 遍历数据行（第5行开始）
     processed_count = 0
-    for row in range(5, ws.max_row + 1):
+    for row in tqdm(range(5, ws.max_row + 1), desc="处理产品"):
         asin = ws.cell(row=row, column=headers.get('ASIN', 22)).value
         link_type = ws.cell(row=row, column=COL_LINK_TYPE).value
 
@@ -338,6 +367,21 @@ def main():
         stockout_7d = ws_data.cell(row=row, column=COL_STOCKOUT_7D).value or 0
         stockout_14d = ws_data.cell(row=row, column=COL_STOCKOUT_14D).value or 0
         stockout_30d = ws_data.cell(row=row, column=COL_STOCKOUT_30D).value or 0
+
+        # 数据校验：负数销量记录警告并修正为0
+        corrected, issues = validate_row_data(
+            sales_7d, sales_14d, sales_30d, sales_60d, sales_90d, monthly_speed
+        )
+        if issues:
+            for issue in issues:
+                logging.warning(f"  数据异常: {issue}")
+        # 使用修正后的值
+        sales_7d = corrected['7天']
+        sales_14d = corrected['14天']
+        sales_30d = corrected['30天']
+        sales_60d = corrected['60天']
+        sales_90d = corrected['90天']
+        monthly_speed = corrected['月速度']
 
         # Step 2a: 当月销量保留原值（不覆盖）
         original_current_month = ws_data.cell(row=row, column=COL_CURRENT_MONTH_SALES).value
