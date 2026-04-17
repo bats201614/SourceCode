@@ -174,6 +174,8 @@ def auto_detect_columns(logger: logging.Logger, df: pd.DataFrame, header_row: in
                 current_parent_header = '规格'
             elif '重量' in h0 and 'LB' in h0:
                 current_parent_header = '重量'
+            elif '销售包装' in h0 and '重量' in h0:
+                current_parent_header = '销售包装重量'
             elif '销售包装' in h0:
                 current_parent_header = '销售包装'
             else:
@@ -224,6 +226,13 @@ def auto_detect_columns(logger: logging.Logger, df: pd.DataFrame, header_row: in
                 col_map['重量LB_毛重'] = i
             elif '重量LB_净重' not in col_map and try_match_Col(h1, '净重'):
                 col_map['重量LB_净重'] = i
+
+        # 匹配销售包装重量毛重/净重 - 当current_parent_header是'销售包装重量'时
+        if current_parent_header == '销售包装重量':
+            if '销售包装重量_毛重' not in col_map and try_match_Col(h1, '毛重'):
+                col_map['销售包装重量_毛重'] = i
+            elif '销售包装重量_净重' not in col_map and try_match_Col(h1, '净重'):
+                col_map['销售包装重量_净重'] = i
 
         # 匹配商品名称列
         if '商品名称' not in col_map:
@@ -295,6 +304,13 @@ def read_产品信息表(logger: logging.Logger) -> pd.DataFrame:
     result_df['重量LB_净重'] = df.iloc[data_start:, col_map.get('重量LB_净重', 10)].reset_index(drop=True) if '重量LB_净重' in col_map else None
     result_df['亚马逊SKU'] = df.iloc[data_start:, col_map['亚马逊SKU']].reset_index(drop=True)
     result_df['商品名称'] = df.iloc[data_start:, col_map.get('商品名称', col_map.get('作品名称', 23))].reset_index(drop=True)
+    # 销售包装尺寸(cm)长/宽/高
+    result_df['销售包装长'] = df.iloc[data_start:, col_map['销售包装长']].reset_index(drop=True) if '销售包装长' in col_map else None
+    result_df['销售包装宽'] = df.iloc[data_start:, col_map['销售包装宽']].reset_index(drop=True) if '销售包装宽' in col_map else None
+    result_df['销售包装高'] = df.iloc[data_start:, col_map['销售包装高']].reset_index(drop=True) if '销售包装高' in col_map else None
+    # 销售包装重量(kg)毛重/净重
+    result_df['销售包装重量_毛重'] = df.iloc[data_start:, col_map.get('销售包装重量_毛重', 17)].reset_index(drop=True) if '销售包装重量_毛重' in col_map else None
+    result_df['销售包装重量_净重'] = df.iloc[data_start:, col_map.get('销售包装重量_净重', 18)].reset_index(drop=True) if '销售包装重量_净重' in col_map else None
 
     result_df = result_df[result_df['亚马逊SKU'].notna()]
     logger.info(f"Loaded {len(result_df)} SKUs from application form")
@@ -595,14 +611,14 @@ def fill_template_with_data(
         _set_cell(ws, column_map, 'Finish Type', target_row, FIXED_VALUES['finish_type'], index=0)
         _set_cell(ws, column_map, 'Wall Art Form', target_row, FIXED_VALUES['wall_art_form'], index=0)
 
-        # E. 包装尺寸重量列
-        _set_cell(ws, column_map, 'Item Package Length', target_row, 规格长, index=0)
-        _set_cell(ws, column_map, 'Item Package Width', target_row, 规格宽, index=0)
-        _set_cell(ws, column_map, 'Item Package Height', target_row, row['规格高'], index=0)
+        # E. 包装尺寸重量列 - 使用销售包装尺寸(cm)和销售包装重量(kg)
+        _set_cell(ws, column_map, 'Item Package Length', target_row, row['销售包装长'], index=0)
+        _set_cell(ws, column_map, 'Item Package Width', target_row, row['销售包装宽'], index=0)
+        _set_cell(ws, column_map, 'Item Package Height', target_row, row['销售包装高'], index=0)
         _set_cell(ws, column_map, 'Package Length Unit', target_row, FIXED_VALUES['package_length_unit'], index=0)
         _set_cell(ws, column_map, 'Package Width Unit', target_row, FIXED_VALUES['package_width_unit'], index=0)
         _set_cell(ws, column_map, 'Package Height Unit', target_row, FIXED_VALUES['package_height_unit'], index=0)
-        _set_cell(ws, column_map, 'Package Weight', target_row, row['重量LB_净重'], index=0)
+        _set_cell(ws, column_map, 'Package Weight', target_row, round(float(row['销售包装重量_净重']), 2) if pd.notna(row['销售包装重量_净重']) else None, index=0)
         _set_cell(ws, column_map, 'Package Weight Unit', target_row, FIXED_VALUES['package_weight_unit'], index=0)
         _set_cell(ws, column_map, 'Item Weight', target_row, row['重量LB_净重'], index=0)
         _set_cell(ws, column_map, 'Item Weight Unit', target_row, FIXED_VALUES['item_weight_unit'], index=0)
