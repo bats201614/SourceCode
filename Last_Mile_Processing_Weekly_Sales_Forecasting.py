@@ -123,7 +123,7 @@ def analyze_trend(sales_7d, sales_14d, sales_30d, sales_60d, sales_90d):
             return 'out_of_stock', 1.05  # 断档后过渡期
 
     # ========== 2. 持续增长 ==========
-    if r7 > 1.1 and r14 > 1.0 and r60 > 1.0 and r90 > 1.0:
+    if r7 > 1.1 and r14 > 1.0 and r7 > r14 > r60 > r90:  # 近7天最高，且持续高于30天
         return 'growth', 1.10  # 每周增长10%
 
     # ========== 3. 持续下降/衰退 ==========
