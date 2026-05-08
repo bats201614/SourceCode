@@ -23,3 +23,5 @@ Thumbs.db
 # Other
 *.log
 *.txt
+.order_automation/
+automation_logs/

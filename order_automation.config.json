@@ -1,0 +1,53 @@
+{
+  "base_order_dir": "C:\\Users\\Administrator\\Desktop\\个人\\订单",
+  "target_url": "https://canvro.saasdiy.com/pc/importorder/",
+  "store_name": "Amazon_Beilo_US",
+  "browser_profile_dir": "C:\\Users\\Administrator\\Desktop\\个人\\code\\.order_automation\\browser_profile",
+  "size_mappings": [
+    {
+      "external_spec_pattern": "8X10\"",
+      "model_name": "帆布画4:5（多尺寸）",
+      "size_option_text": "8x10inch"
+    },
+    {
+      "external_spec_pattern": "8X12\"",
+      "model_name": "帆布画2:3（多尺寸）",
+      "size_option_text": "8x12inch"
+    },
+    {
+      "external_spec_pattern": "10X10\"",
+      "model_name": "帆布画1:1（多尺寸）",
+      "size_option_text": "10x10inch"
+    },
+    {
+      "external_spec_pattern": "12X16\"",
+      "model_name": "帆布画3:4（多尺寸）",
+      "size_option_text": "12x16inch"
+    },
+    {
+      "external_spec_pattern": "12X18\"",
+      "model_name": "帆布画2:3（多尺寸）",
+      "size_option_text": "12x18inch"
+    },
+    {
+      "external_spec_pattern": "16X20\"",
+      "model_name": "帆布画4:5（多尺寸）",
+      "size_option_text": "16x20inch"
+    },
+    {
+      "external_spec_pattern": "16X24\"",
+      "model_name": "帆布画2:3（多尺寸）",
+      "size_option_text": "16x24inch"
+    },
+    {
+      "external_spec_pattern": "24X32\"",
+      "model_name": "帆布画3:4（多尺寸）",
+      "size_option_text": "24x32inch"
+    },
+    {
+      "external_spec_pattern": "24X36\"",
+      "model_name": "帆布画2:3（多尺寸）",
+      "size_option_text": "24x36inch"
+    }
+  ]
+}

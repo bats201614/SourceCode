@@ -123,8 +123,9 @@ def analyze_trend(sales_7d, sales_14d, sales_30d, sales_60d, sales_90d):
             return 'out_of_stock', 1.05  # 断档后过渡期
 
     # ========== 2. 持续增长 ==========
-    if r7 > 1.1 and r14 > 1.0 and r7 > r14 > r60 > r90:  # 近7天最高，且持续高于30天
-        return 'growth', 1.10  # 每周增长10%
+    if r7 > 1.05 and r14 > 1.0 and r7 > r14 > r60 > r90:  # 近7天最高，且持续高于30天
+        dynamic_factor = min(max(r7, 1.05), 1.25)  # 根据近7天的增速动态调整增长系数，最低1.05，最高1.25
+        return 'growth', round(dynamic_factor, 2)  # 增长趋势，系数根据近7天增速动态调整
 
     # ========== 3. 持续下降/衰退 ==========
     # 特征：各期比值都 < 1，且呈现持续下滑趋势
@@ -178,6 +179,7 @@ def generate_trend_weekly_forecast(base_weekly, sales_7d, sales_14d, sales_30d, 
     基于各期销量综合分析趋势类型
     """
     trend_type, trend_factor = analyze_trend(sales_7d, sales_14d, sales_30d, sales_60d, sales_90d)
+    growth_decay = 0.85  # 趋势衰减系数，控制增长/下降趋势的持续性
 
     weekly_forecasts = []
     for week in range(1, num_weeks + 1):
@@ -186,7 +188,15 @@ def generate_trend_weekly_forecast(base_weekly, sales_7d, sales_14d, sales_30d, 
         else:
             # 趋势调整
             if trend_type in ['growth', 'ramping_up', 'seasonal']:
-                adjusted = base_weekly * (trend_factor ** (week - 1))
+                # 公式：1 + (原始增幅 * 衰减的次幂)
+                # 例如：1 + (0.09 * (0.85 ** (week-1)))
+                current_growth_rate = (trend_factor - 1) * (growth_decay ** (week - 1))
+                adjusted_factor = 1 + current_growth_rate
+                
+                # 累积预测：基于前一周的值进行连乘，或者基于 base 计算累积比例
+                # 这里推荐基于上周预测值计算，逻辑更直观
+                prev_value = weekly_forecasts[-1]
+                adjusted = prev_value * adjusted_factor
             elif trend_type in ['decline', 'ramping_down']:
                 # 下降趋势有下限，不能低于基准的50%
                 adjusted = base_weekly * max(0.5, trend_factor ** (week - 1))
