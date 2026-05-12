@@ -156,10 +156,11 @@ def find_processed_image(folder_path: Path) -> Path:
     return matches[0]
 
 
-def index_local_assets(day_dir: Path) -> Dict[str, LocalOrderAsset]:
+def index_local_assets(day_dir: Path, logger: Optional[logging.Logger] = None) -> Dict[str, LocalOrderAsset]:
     if not day_dir.exists():
         raise OrderAutomationError(f"Date folder not found: {day_dir}")
 
+    active_logger = logger or logging.getLogger("order_automation")
     assets: Dict[str, LocalOrderAsset] = {}
     for folder_path in sorted(path for path in day_dir.iterdir() if path.is_dir()):
         if folder_path.name in IGNORED_FOLDERS:
@@ -173,7 +174,11 @@ def index_local_assets(day_dir: Path) -> Dict[str, LocalOrderAsset]:
                 f"Duplicate match key {match_key} found in folders: "
                 f"{assets[match_key].folder_path} and {folder_path}"
             )
-        processed_image_path = find_processed_image(folder_path)
+        try:
+            processed_image_path = find_processed_image(folder_path)
+        except OrderAutomationError as exc:
+            active_logger.warning("Skipping folder %s: %s", folder_path, exc)
+            continue
         assets[match_key] = LocalOrderAsset(
             match_key=match_key,
             folder_path=folder_path,
@@ -219,6 +224,61 @@ def normalize_spec(spec_text: str) -> str:
     return normalized
 
 
+def expand_ui_text_variants(text: str) -> List[str]:
+    variants = {text.strip()}
+    queue = list(variants)
+    replacements = [
+        (":", "："),
+        ("：", ":"),
+        ("(", "（"),
+        ("（", "("),
+        (")", "）"),
+        ("）", ")"),
+    ]
+
+    while queue:
+        current = queue.pop()
+        for old, new in replacements:
+            if old not in current:
+                continue
+            candidate = current.replace(old, new)
+            if candidate not in variants:
+                variants.add(candidate)
+                queue.append(candidate)
+
+    optional_suffix = "（多尺寸）"
+    extra_variants = set()
+    for current in variants:
+        if current.endswith(optional_suffix):
+            extra_variants.add(current[: -len(optional_suffix)])
+        elif current and "帆布画" in current and "尺寸" not in current:
+            extra_variants.add(f"{current}{optional_suffix}")
+    variants.update(extra_variants)
+    return list(variants)
+
+
+def expand_size_text_variants(text: str) -> List[str]:
+    variants = {text.strip()}
+    queue = list(variants)
+    replacements = [
+        ("x", "×"),
+        ("X", "×"),
+        ("×", "x"),
+        ("×", "X"),
+    ]
+
+    while queue:
+        current = queue.pop()
+        for old, new in replacements:
+            if old not in current:
+                continue
+            candidate = current.replace(old, new)
+            if candidate not in variants:
+                variants.add(candidate)
+                queue.append(candidate)
+    return list(variants)
+
+
 def build_size_mappings(entries: Iterable[Dict[str, str]]) -> List[SizeMapping]:
     mappings: List[SizeMapping] = []
     for entry in entries:
@@ -259,7 +319,7 @@ class OrderAutomation:
 
     def run(self) -> None:
         self.validate_runtime_paths()
-        assets = index_local_assets(self.day_dir)
+        assets = index_local_assets(self.day_dir, logger=self.logger)
         self.logger.info("Indexed %s local assets from %s", len(assets), self.day_dir)
         self.process_orders(assets)
 
@@ -579,16 +639,74 @@ class OrderAutomation:
         return match.group(1)
 
     def apply_size_mapping(self, page: Page, mapping: SizeMapping) -> None:
+        self.wait_for_overlays_to_clear(page)
+        if self.try_select_model_row(page, mapping):
+            self.wait_for_overlays_to_clear(page)
+            return
+
         model = self.locator_by_text(page, [mapping.model_name])
         model.wait_for(state="visible")
-        model.click()
-        size_option = self.locator_by_text(page, [mapping.size_option_text])
+        model.click(force=True)
+        size_option = self.locator_by_text(page, expand_size_text_variants(mapping.size_option_text))
         size_option.wait_for(state="visible")
-        size_option.click()
+        size_option.click(force=True)
         confirm = self.locator_by_text(page, ["确认", "确定"])
         confirm.wait_for(state="visible")
-        confirm.click()
+        confirm.click(force=True)
         page.wait_for_load_state("networkidle")
+
+    def wait_for_overlays_to_clear(self, page: Page, timeout_ms: int = 20_000) -> None:
+        selectors = [".el-loading-mask", ".v-modal"]
+        deadline = datetime.now().timestamp() + timeout_ms / 1000
+        while datetime.now().timestamp() < deadline:
+            blocking = False
+            for selector in selectors:
+                locator = page.locator(selector)
+                if not locator.count():
+                    continue
+                try:
+                    for index in range(locator.count()):
+                        if locator.nth(index).is_visible():
+                            blocking = True
+                            break
+                except PlaywrightError:
+                    continue
+                if blocking:
+                    break
+            if not blocking:
+                return
+            page.wait_for_timeout(200)
+
+    def try_select_model_row(self, page: Page, mapping: SizeMapping) -> bool:
+        rows = page.locator(".el-table__body .el-table__row")
+        for row_index in range(rows.count()):
+            row = rows.nth(row_index)
+            try:
+                row_text = (row.text_content() or "").strip()
+            except PlaywrightError:
+                continue
+            if mapping.model_name not in row_text:
+                continue
+            if not any(size_text in row_text for size_text in expand_size_text_variants(mapping.size_option_text)):
+                continue
+
+            choose_button = None
+            for button_text in ["选择", "确认", "确定"]:
+                button = row.get_by_text(button_text, exact=False)
+                if button.count():
+                    choose_button = button.first
+                    break
+            if choose_button is None:
+                continue
+
+            self.logger.info(
+                "Selecting model row directly for model=%s size=%s",
+                mapping.model_name,
+                mapping.size_option_text,
+            )
+            choose_button.click(force=True)
+            return True
+        return False
 
     def upload_and_design(self, page: Page, asset: LocalOrderAsset) -> None:
         self.logger.info("Uploading image %s", asset.processed_image_path)
@@ -659,8 +777,18 @@ class OrderAutomation:
 
     def locator_by_text(self, page: Page, texts: Sequence[str]) -> Any:
         for text in texts:
-            locator = page.get_by_text(text, exact=False)
-            if locator.count():
+            for variant in expand_ui_text_variants(text):
+                locator = page.get_by_text(variant, exact=False)
+                count = locator.count()
+                if not count:
+                    continue
+                for index in range(count):
+                    candidate = locator.nth(index)
+                    try:
+                        if candidate.is_visible():
+                            return candidate
+                    except PlaywrightError:
+                        continue
                 return locator.first
         raise OrderAutomationError(f"Could not find any locator by text: {texts}")
 

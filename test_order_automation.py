@@ -11,6 +11,8 @@ from order_automation import (
     OrderAutomationError,
     build_size_mappings,
     determine_orientation,
+    expand_ui_text_variants,
+    expand_size_text_variants,
     extract_match_key_from_folder_name,
     extract_match_key_from_remark,
     find_size_mapping,
@@ -107,7 +109,10 @@ class FakeClickLocator(FakeLocator):
         super().__init__(count, visible, text)
         self.clicked = False
 
-    def click(self) -> None:
+    def nth(self, _index: int):
+        return self
+
+    def click(self, force: bool = False) -> None:
         self.clicked = True
 
 
@@ -134,6 +139,17 @@ class FakeButtonLocator(FakeClickLocator):
 
     def locator(self, _selector: str):
         return self.ancestor or FakeClickLocator(0, False, "")
+
+
+class FakeRowsLocator:
+    def __init__(self, rows):
+        self._rows = rows
+
+    def count(self):
+        return len(self._rows)
+
+    def nth(self, index: int):
+        return self._rows[index]
 
 
 class OrderAutomationTests(unittest.TestCase):
@@ -250,15 +266,20 @@ class OrderAutomationTests(unittest.TestCase):
 
         self.assertEqual(list(assets.keys()), ["0493831-001"])
 
-    def test_index_local_assets_requires_single_processed_image(self) -> None:
+    def test_index_local_assets_skips_folder_with_multiple_processed_images(self) -> None:
         folder = make_folder(
             "1-111-4243692-4662650-001-8x10-None-横图",
             [make_file("a-processed.jpg"), make_file("b-processed.jpg")],
         )
-        day_dir = make_folder("2026.5.5", [folder])
+        valid_folder = make_folder(
+            "1-111-5555555-4662650-002-8x10-None-竖图",
+            [make_file("ok-processed.jpg")],
+        )
+        day_dir = make_folder("2026.5.5", [folder, valid_folder])
 
-        with self.assertRaises(OrderAutomationError):
-            index_local_assets(day_dir)
+        assets = index_local_assets(day_dir)
+
+        self.assertEqual(list(assets.keys()), ["4662650-002"])
 
     def test_resolve_asset_from_remark_with_composite_key(self) -> None:
         first = make_folder(
@@ -402,6 +423,90 @@ class OrderAutomationTests(unittest.TestCase):
         row = automation.find_row_from_action_buttons(page)
 
         self.assertIs(row, ancestor)
+
+
+    def test_expand_ui_text_variants_supports_fullwidth_punctuation(self) -> None:
+        variants = expand_ui_text_variants("帆布画4:5（多尺寸）")
+
+        self.assertIn("帆布画4：5（多尺寸）", variants)
+        self.assertIn("帆布画4：5", variants)
+
+    def test_locator_by_text_tries_text_variants(self) -> None:
+        automation = self.make_automation()
+        page = Mock()
+
+        def fake_get_by_text(text: str, exact: bool = False):
+            if text == "帆布画4：5（多尺寸）":
+                return FakeClickLocator(1, True, text)
+            return FakeClickLocator(0, False, text)
+
+        page.get_by_text.side_effect = fake_get_by_text
+
+        locator = automation.locator_by_text(page, ["帆布画4:5（多尺寸）"])
+
+        self.assertEqual(locator.text_content(), "帆布画4：5（多尺寸）")
+
+    def test_locator_by_text_prefers_visible_match(self) -> None:
+        automation = self.make_automation()
+        hidden = FakeClickLocator(1, False, "设计")
+        visible = FakeClickLocator(1, True, "设计")
+
+        class FakeMultiLocator:
+            def __init__(self, locators):
+                self.locators = locators
+
+            def count(self):
+                return len(self.locators)
+
+            def nth(self, index: int):
+                return self.locators[index]
+
+            @property
+            def first(self):
+                return self.locators[0]
+
+        page = Mock()
+        page.get_by_text.side_effect = lambda text, exact=False: FakeMultiLocator([hidden, visible])
+
+        locator = automation.locator_by_text(page, ["设计"])
+
+        self.assertIs(locator, visible)
+
+    def test_expand_size_text_variants_supports_multiplication_symbol(self) -> None:
+        variants = expand_size_text_variants("16x20inch")
+
+        self.assertIn("16×20inch", variants)
+        self.assertIn("16X20inch", variants)
+
+    def test_try_select_model_row_clicks_choose_button(self) -> None:
+        automation = self.make_automation()
+        choose = FakeClickLocator(1, True, "选择")
+        row = Mock()
+        row.text_content.return_value = "帆布画4：5（多尺寸） 16×20inch 选择"
+
+        def fake_get_by_text(text: str, exact: bool = False):
+            if text == "选择":
+                return choose
+            return FakeClickLocator(0, False, text)
+
+        row.get_by_text.side_effect = fake_get_by_text
+        page = Mock()
+        page.locator.return_value = FakeRowsLocator([row])
+
+        mapping = build_size_mappings(
+            [
+                {
+                    "external_spec_pattern": '16X20"',
+                    "model_name": "帆布画4：5（多尺寸）",
+                    "size_option_text": "16x20inch",
+                }
+            ]
+        )[0]
+
+        result = automation.try_select_model_row(page, mapping)
+
+        self.assertTrue(result)
+        self.assertTrue(choose.clicked)
 
 
 if __name__ == "__main__":
